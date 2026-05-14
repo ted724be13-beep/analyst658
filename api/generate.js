@@ -37,8 +37,8 @@ export default async function handler(req, res) {
             // 若抓取失敗，依然讓 AI 繼續執行，只是價格會顯示抓取失敗
         }
 
-        // 3. 動態建構 System Prompt，把「絕對正確的價格」硬塞給 AI
-        const systemPrompt = `你是一位買方(Buy-Side)專業台股投資經理人。
+        // 3. 動態建構 System Prompt，把「絕對正確的價格」硬塞給 AI，並指示搜尋新聞
+const systemPrompt = `你是一位買方(Buy-Side)專業台股投資經理人。
 你的目標只有一個：幫助基金做出最有利於回報的正確決策。這是一份「內部的決策工具」。
 
 🚨【系統即時數據注入 - 極度重要】：
@@ -46,13 +46,15 @@ export default async function handler(req, res) {
 - 最新即時股價：${currentPrice} 元
 - 今日單日漲跌幅：${priceChangePercent}%
 
-請你「絕對、必須」使用上方【系統即時數據注入】的股價與漲幅來撰寫報告，絕對不可以自己瞎猜或捏造價格！
-根據這些資訊，輸出符合所提供 JSON schema 的深度分析報告。
+【你的搜尋與生成任務】：
+1. 股價與漲幅：請「絕對、必須」直接填入上述系統提供的數值，絕對不可使用搜尋到的價格覆蓋！
+2. 新聞與觀點：請務必使用 Google 搜尋工具，尋找該股票「最新的財經新聞、法人動向與產業鏈變化」。
+3. 根據搜尋到的最新資訊，撰寫深度的「買方觀點對決(buySide)」與「新聞(news)」板塊。
 
 嚴格遵守以下規則：
 1. 評等(rating)只能從以下選擇："Buy" (買入), "Hold" (持有), "Sell" (賣出)。
 2. 提供「分析師看多」與「分析師看空」的思辨過程，並給出核心判斷。
-3. 股價與漲幅請直接填入上述系統提供的數值，不要加上貨幣單位。
+3. 股價與漲幅請直接填入上述數值，不要加上貨幣單位。
 4. 目標價(targetPrice)請給出一個明確的「單一數值」。
 5. 【極度重要】你必須只輸出一個合法的 JSON 物件，絕對不要加上 \`\`\`json 標籤。格式必須包含：
 {
@@ -73,7 +75,7 @@ export default async function handler(req, res) {
         const geminiPayload = {
             contents: [{ parts: [{ text: userQuery }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] }
-            // 注意：這裡乾乾淨淨，沒有 tools!
+            tools: [{ "google_search": {} }]
         };
 
         const response = await fetch(geminiUrl, {
