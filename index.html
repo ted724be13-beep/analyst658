@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>海涵路分析師系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 新增 html2pdf.js 庫以支援 PDF 匯出 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- 新增 TradingView 圖表庫 -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        // 自定義莫蘭迪色系
+                        morandi: {
+                            gray: '#B8B8B0',  // 主色灰色
+                            red: '#C9A4A0',   // 莫蘭迪紅
+                            blue: '#A2B4C0',  // 莫蘭迪藍
+                            green: '#A3B5A6', // 莫蘭迪綠
+                            // 調整背景和面板顏色以適配莫蘭迪色系
+                            bg: '#f0f0ed',    // 淺灰白背景
+                            panel: '#ffffff', // 純白面板
+                            text: '#4a4a4a',  // 深灰文字
+                            muted: '#8e8e8e'  // 淺灰文字
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #f0f0ed; /* 使用自定義背景色 */
+            color: #4a4a4a; /* 使用自定義文字色 */
+            font-family: 'Inter', sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9); /* 白色半透明面板 */
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(184, 184, 176, 0.3); /* 邊框使用莫蘭迪灰 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        }
+        /* 移除 text-glow，因為不符合莫蘭迪風格 */
+        .text-glow {
+            text-shadow: none; 
+        }
+        .loader {
+            border-top-color: #A2B4C0; /* 莫蘭迪藍 */
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f0f0ed; }
+        ::-webkit-scrollbar-thumb { background: #B8B8B0; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #8e8e8e; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-10 px-4 md:px-8">
+
+    <header class="w-full max-w-6xl mb-8 text-center">
+        <h1 class="text-4xl md:text-5xl font-bold mb-8 text-morandi-gray">
+            <i class="fa-solid fa-chart-line mr-2 text-morandi-blue"></i>海涵路分析師系統
+        </h1>
+
+        <div class="max-w-2xl mx-auto relative group">
+            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <i class="fa-solid fa-magnifying-glass text-morandi-muted group-focus-within:text-morandi-blue transition-colors"></i>
+            </div>
+            <!-- 優化手機版輸入框的 padding 與文字大小 -->
+            <input type="text" id="tickerInput" 
+                class="w-full bg-white border border-morandi-gray text-morandi-text rounded-full py-3 md:py-4 pl-10 md:pl-12 pr-16 md:pr-32 focus:outline-none focus:border-morandi-blue focus:ring-2 focus:ring-morandi-blue/30 transition-all text-base md:text-lg shadow-sm placeholder:text-morandi-muted"
+                placeholder="輸入股票代號或名稱..."
+                onkeypress="handleKeyPress(event)">
+            <!-- 優化手機版按鈕，縮小並改用圖示 -->
+            <button onclick="generateReport()" id="generateBtn"
+                class="absolute right-2 top-2 bottom-2 bg-morandi-blue hover:bg-[#8fa1ae] text-white font-semibold rounded-full w-10 md:w-auto md:px-6 transition-all shadow-sm transform hover:scale-105 flex items-center justify-center">
+                <span class="hidden md:inline">生成報告</span>
+                <i class="fa-solid fa-paper-plane md:hidden"></i>
+            </button>
+        </div>
+    </header>
+
+    <div id="loadingIndicator" class="hidden flex-col items-center justify-center my-20">
+        <div class="loader ease-linear rounded-full border-4 border-morandi-gray/30 h-16 w-16 mb-4"></div>
+        <p class="text-morandi-blue font-semibold animate-pulse tracking-widest uppercase text-sm">
+            <i class="fa-solid fa-satellite-dish mr-2"></i>分析師正在蒐集最新數據並撰寫報告中...
+        </p>
+    </div>
+
+    <div id="errorMessage" class="hidden w-full max-w-6xl bg-morandi-red/20 border border-morandi-red text-morandi-text p-6 rounded-2xl mb-8 shadow-sm">
+        <div class="flex items-start">
+            <i class="fa-solid fa-triangle-exclamation text-2xl mr-4 mt-1 text-morandi-red"></i>
+            <div>
+                <h3 class="font-bold text-lg mb-1">生成失敗</h3>
+                <p id="errorText">無法取得資料，請稍後再試或確認股票代號是否正確。</p>
+            </div>
+        </div>
+    </div>
+
+    <main id="reportContainer" class="hidden w-full max-w-6xl flex-col gap-6">
+        
+        <!-- 工具列：新增匯出 PDF 按鈕 -->
+        <div class="flex justify-end w-full mb-2">
+            <button onclick="exportPDF()" class="bg-white border border-morandi-gray text-morandi-text hover:bg-morandi-gray/10 px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center text-sm font-semibold">
+                <i class="fa-solid fa-file-pdf text-morandi-red mr-2"></i>匯出 PDF
+            </button>
+        </div>
+
+        <!-- 頂部：股價資訊與評級 -->
+        <div class="glass-panel p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div>
+                <div class="flex items-center gap-4 mb-2 flex-wrap">
+                    <h2 id="r-ticker" class="text-3xl md:text-4xl font-bold text-morandi-text">---</h2>
+                    <div id="r-rating-badge" class="px-6 py-2 rounded-xl border-2 font-bold text-lg md:text-xl bg-white shadow-sm whitespace-nowrap">
+                        ---
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-4 mt-2">
+                    <span id="r-price" class="text-5xl md:text-6xl font-mono font-bold text-morandi-text">---</span>
+                    <span id="r-change" class="text-2xl font-mono font-semibold">---</span>
+                </div>
+                
+                <!-- 精準標籤區塊 -->
+                <div id="r-tags" class="flex flex-wrap justify-start gap-2 mt-4 relative z-10">
+                    <!-- JS 動態填入 -->
+                </div>
+            </div>
+            <div class="flex flex-col gap-4 border-t md:border-t-0 md:border-l border-morandi-gray/30 pt-4 md:pt-0 md:pl-8 min-w-[200px] w-full md:w-auto">
+                <div class="flex justify-between items-center md:flex-col md:items-start md:justify-center">
+                    <span class="text-morandi-muted text-sm block mb-1">市值</span>
+                    <span id="r-marketCap" class="text-base font-mono text-morandi-text font-semibold">---</span>
+                </div>
+                <div class="flex justify-between items-center md:flex-col md:items-start md:justify-center">
+                    <span class="text-morandi-muted text-sm block mb-1">預估本益比 (P/E)</span>
+                    <span id="r-pe" class="text-base font-mono text-morandi-text font-semibold">---</span>
+                </div>
+                <div class="flex justify-between items-center md:flex-col md:items-start md:justify-center">
+                    <span class="text-morandi-muted text-sm block mb-1">目標價</span>
+                    <span id="r-target" class="text-2xl font-mono text-morandi-blue font-bold">---</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 頁籤導覽列 -->
+        <div class="flex border-b border-morandi-gray/30 mt-2 mb-2 w-full">
+            <button id="tab-btn-fundamental" onclick="switchTab('fundamental')" class="py-3 px-6 text-sm font-bold border-b-2 border-morandi-blue text-morandi-blue hover:bg-morandi-gray/10 transition-colors">
+                <i class="fa-solid fa-file-invoice-dollar mr-2"></i>分析師觀點
+            </button>
+            <button id="tab-btn-technical" onclick="switchTab('technical')" class="py-3 px-6 text-sm font-bold border-b-2 border-transparent text-morandi-muted hover:text-morandi-text hover:bg-morandi-gray/10 transition-colors">
+                <i class="fa-solid fa-chart-pie mr-2"></i>技術分析 <i class="fa-solid fa-lock text-xs ml-1" id="lock-icon"></i>
+            </button>
+        </div>
+
+        <!-- Tab 1: 分析師觀點 -->
+        <div id="tab-content-fundamental" class="flex flex-col gap-6 w-full">
+            
+            <!-- BUY-SIDE 面板 (移入 Tab 1) -->
+            <div class="glass-panel p-6 rounded-2xl flex flex-col justify-between relative overflow-hidden">
+                <div class="absolute -right-10 -top-10 opacity-[0.03] pointer-events-none">
+                    <i class="fa-solid fa-chess-knight text-9xl text-black"></i>
+                </div>
+
+                <div class="flex justify-between items-center mb-4 relative z-10">
+                    <h3 class="text-morandi-muted text-sm uppercase tracking-wider font-semibold flex items-center">
+                        <i class="fa-solid fa-scale-unbalanced text-morandi-blue mr-2"></i>BUY-SIDE
+                    </h3>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10 mb-4">
+                    <!-- 看多觀點 -->
+                    <div class="bg-morandi-green/10 border border-morandi-green/30 p-4 rounded-xl flex flex-col">
+                        <h4 class="text-morandi-green font-bold text-sm mb-2 flex items-center"><i class="fa-solid fa-arrow-trend-up mr-2"></i>看多觀點</h4>
+                        <p id="r-view-bull" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+                    <!-- 看空觀點 -->
+                    <div class="bg-morandi-red/10 border border-morandi-red/30 p-4 rounded-xl flex flex-col">
+                        <h4 class="text-morandi-red font-bold text-sm mb-2 flex items-center"><i class="fa-solid fa-arrow-trend-down mr-2"></i>看空觀點</h4>
+                        <p id="r-view-bear" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+                </div>
+
+                <!-- 核心判斷 -->
+                <div class="bg-morandi-gray/10 border-l-4 border-morandi-blue p-4 rounded-r-xl relative z-10 mt-auto">
+                    <h4 class="text-morandi-blue font-bold text-sm mb-1 flex items-center"><i class="fa-solid fa-gavel mr-2"></i>經理人核心判斷</h4>
+                    <p id="r-view-judgment" class="text-sm text-morandi-text leading-relaxed font-medium">---</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- 相對估值法 -->
+                <div class="glass-panel p-6 rounded-2xl relative">
+                    <div class="absolute top-0 right-0 bg-morandi-blue/10 text-morandi-blue text-xs px-3 py-1 rounded-bl-lg rounded-tr-xl font-mono border-b border-l border-morandi-blue/20">Model: Relative</div>
+                    <h3 class="text-xl font-bold text-morandi-text mb-4 flex items-center">
+                        <i class="fa-solid fa-scale-balanced text-morandi-blue mr-2"></i>相對估值法
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">算法</h4>
+                            <p id="r-valRel-algo" class="text-sm text-morandi-text bg-morandi-gray/10 p-3 rounded-lg border border-morandi-gray/30">---</p>
+                        </div>
+                        <div>
+                            <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">邏輯</h4>
+                            <p id="r-valRel-logic" class="text-sm text-morandi-text">---</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-2">
+                            <div>
+                                <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">優點</h4>
+                                <p id="r-valRel-pros" class="text-sm text-morandi-text border-l-2 border-morandi-green pl-3 italic">---</p>
+                            </div>
+                            <div>
+                                <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">缺點</h4>
+                                <p id="r-valRel-cons" class="text-sm text-morandi-text border-l-2 border-morandi-red pl-3 italic">---</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 絕對估值法 -->
+                <div class="glass-panel p-6 rounded-2xl relative">
+                    <div class="absolute top-0 right-0 bg-morandi-green/10 text-morandi-green text-xs px-3 py-1 rounded-bl-lg rounded-tr-xl font-mono border-b border-l border-morandi-green/20">Model: DCF</div>
+                    <h3 class="text-xl font-bold text-morandi-text mb-4 flex items-center">
+                        <i class="fa-solid fa-money-bill-trend-up text-morandi-green mr-2"></i>絕對估值法
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">算法</h4>
+                            <p id="r-valAbs-algo" class="text-sm text-morandi-text bg-morandi-gray/10 p-3 rounded-lg border border-morandi-gray/30">---</p>
+                        </div>
+                        <div>
+                            <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">邏輯</h4>
+                            <p id="r-valAbs-logic" class="text-sm text-morandi-text">---</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-2">
+                            <div>
+                                <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">優點</h4>
+                                <p id="r-valAbs-pros" class="text-sm text-morandi-text border-l-2 border-morandi-green pl-3 italic">---</p>
+                            </div>
+                            <div>
+                                <h4 class="text-xs text-morandi-muted uppercase tracking-wider mb-1">缺點</h4>
+                                <p id="r-valAbs-cons" class="text-sm text-morandi-text border-l-2 border-morandi-red pl-3 italic">---</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-2xl">
+                <h3 class="text-xl font-bold text-morandi-text mb-4 flex items-center">
+                    <i class="fa-solid fa-layer-group text-morandi-gray mr-2"></i>其他影響因子
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-morandi-gray/10 p-4 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-colors">
+                        <h4 class="text-morandi-text font-semibold mb-2"><i class="fa-solid fa-globe mr-2 text-morandi-gray"></i>宏觀經濟</h4>
+                        <p id="r-fact-macro" class="text-sm text-morandi-text">---</p>
+                    </div>
+                    <div class="bg-morandi-gray/10 p-4 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-colors">
+                        <h4 class="text-morandi-text font-semibold mb-2"><i class="fa-solid fa-building-columns mr-2 text-morandi-gray"></i>資本市場</h4>
+                        <p id="r-fact-capital" class="text-sm text-morandi-text">---</p>
+                    </div>
+                    <div class="bg-morandi-gray/10 p-4 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-colors">
+                        <h4 class="text-morandi-text font-semibold mb-2"><i class="fa-solid fa-industry mr-2 text-morandi-gray"></i>產業展望</h4>
+                        <p id="r-fact-industry" class="text-sm text-morandi-text">---</p>
+                    </div>
+                    <div class="bg-morandi-gray/10 p-4 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-colors">
+                        <h4 class="text-morandi-text font-semibold mb-2"><i class="fa-solid fa-building mr-2 text-morandi-gray"></i>公司評估</h4>
+                        <p id="r-fact-company" class="text-sm text-morandi-text">---</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 新聞列表 -->
+                <div class="glass-panel p-6 rounded-2xl lg:col-span-2">
+                    <h3 class="text-xl font-bold text-morandi-text mb-4 flex items-center">
+                        <i class="fa-regular fa-newspaper text-morandi-gray mr-2"></i>近期催化劑 (Catalysts)
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="text-morandi-muted text-sm border-b border-morandi-gray/30">
+                                    <th class="pb-3 font-medium">影響力</th>
+                                    <th class="pb-3 font-medium">新聞標題 (來源)</th>
+                                    <th class="pb-3 font-medium">分析師解讀</th>
+                                </tr>
+                            </thead>
+                            <tbody id="r-news-body" class="text-sm">
+                                <!-- JS 動態填入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 經理人總結 -->
+                <div class="glass-panel p-6 rounded-2xl bg-gradient-to-br from-white to-morandi-gray/10 border-morandi-gray/40">
+                    <h3 class="text-xl font-bold text-morandi-text mb-4 flex items-center">
+                        <i class="fa-solid fa-user-tie text-morandi-blue mr-2"></i>經理人總結
+                    </h3>
+                    <div class="text-morandi-text leading-relaxed space-y-3" id="r-summary">
+                        ---
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: 技術分析 (預設隱藏) -->
+        <div id="tab-content-technical" class="hidden flex-col gap-6 w-full">
+            <div class="glass-panel p-6 rounded-2xl">
+                <div class="mb-6 border-b border-morandi-gray/20 pb-4">
+                    <h3 class="text-2xl font-bold text-morandi-text">
+                        技術分析
+                    </h3>
+                </div>
+
+                <!-- 專業 K 線圖表容器 -->
+                <div id="tv-chart-container" class="w-full h-[450px] mb-6 rounded-xl overflow-hidden border border-morandi-gray/30 bg-white"></div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+                    <!-- 支撐與壓力 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">支撐與壓力線</h4>
+                        </div>
+                        <p id="r-ta-support" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+                    
+                    <!-- 均線 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">移動平均線 (MA)</h4>
+                        </div>
+                        <p id="r-ta-ma" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+
+                    <!-- K線 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">K線型態</h4>
+                        </div>
+                        <p id="r-ta-kline" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+
+                    <!-- KD指標 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">KD 指標</h4>
+                        </div>
+                        <p id="r-ta-kd" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+
+                    <!-- MACD -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">MACD</h4>
+                        </div>
+                        <p id="r-ta-macd" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+
+                    <!-- 布林通道 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">布林通道</h4>
+                        </div>
+                        <p id="r-ta-bollinger" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+
+                    <!-- 乖離率 -->
+                    <div class="bg-morandi-gray/10 p-5 rounded-xl border border-morandi-gray/30 hover:bg-morandi-gray/20 transition-all flex flex-col md:col-span-2 lg:col-span-3">
+                        <div class="mb-3">
+                            <h4 class="text-morandi-text font-bold text-lg">乖離率 (BIAS)</h4>
+                        </div>
+                        <p id="r-ta-bias" class="text-sm text-morandi-text leading-relaxed flex-grow">---</p>
+                    </div>
+                </div>
+
+                <!-- 技術分析總結 -->
+                <div class="bg-gradient-to-r from-morandi-blue/20 to-morandi-gray/10 p-5 rounded-xl border border-morandi-blue/30 relative overflow-hidden">
+                    <div class="absolute -right-4 -bottom-4 opacity-10">
+                        <i class="fa-solid fa-microchip text-8xl"></i>
+                    </div>
+                    <h4 class="text-morandi-blue font-bold text-lg mb-3 relative z-10">
+                        技術分析總結
+                    </h4>
+                    <p id="r-ta-summary" class="text-sm text-morandi-text leading-relaxed relative z-10 font-medium">---</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 專屬密碼鎖彈出視窗 -->
+    <div id="passwordModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity duration-300 opacity-0">
+        <div class="bg-white p-6 rounded-2xl border border-morandi-gray shadow-xl w-full max-w-sm flex flex-col gap-4 transform transition-all duration-300 scale-95" id="passwordModalContent">
+            <h3 class="text-xl font-bold text-morandi-text flex items-center">
+                <i class="fa-solid fa-lock mr-2 text-morandi-red"></i>解鎖技術分析
+            </h3>
+            <p class="text-sm text-morandi-muted">此為受保護區塊，請輸入高階經理人專屬密碼以查看即時 K 線圖表與深度指標分析。</p>
+            <div>
+                <input type="password" id="techPasswordInput" class="w-full border border-morandi-gray/50 text-morandi-text rounded-lg px-4 py-3 focus:outline-none focus:border-morandi-blue focus:ring-1 focus:ring-morandi-blue transition-colors bg-morandi-gray/5" placeholder="輸入密碼..." onkeypress="if(event.key==='Enter') unlockTechTab()">
+                <p id="passwordError" class="text-xs text-morandi-red mt-2 hidden"><i class="fa-solid fa-circle-exclamation mr-1"></i>密碼錯誤，請重新輸入。</p>
+            </div>
+            <div class="flex justify-end gap-3 mt-2">
+                <button onclick="closePasswordModal()" class="px-4 py-2 text-sm text-morandi-muted hover:bg-morandi-gray/10 rounded-lg transition-colors font-semibold">取消</button>
+                <button onclick="unlockTechTab()" class="px-5 py-2 text-sm bg-morandi-blue text-white rounded-lg hover:bg-[#8fa1ae] transition-all shadow-sm font-semibold flex items-center">
+                    <i class="fa-solid fa-key mr-2"></i>解鎖
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isTechUnlocked = false; // 控制技術分析頁籤是否解鎖
+        let currentChartSymbol = "TWSE:2330"; // 儲存目前的股票代號
+        let isChartRendered = false; // 判斷圖表是否已經渲染過
+
+        // 處理 Enter 鍵提交
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                generateReport();
+            }
+        }
+
+        // 格式化文字，將 Markdown 粗體轉換為 HTML (修改為莫蘭迪色系)
+        function formatText(text) {
+            if (!text) return '---';
+            return text.replace(/\*\*(.*?)\*\*/g, '<strong class="text-morandi-text font-bold">$1</strong>');
+        }
+
+        // 渲染星星/火焰圖示 (修改為莫蘭迪色系)
+        function getImpactIcons(impactStr) {
+            let count = 1;
+            const str = impactStr.toUpperCase();
+            if (str.includes('HIGH') || str.includes('高')) count = 3;
+            else if (str.includes('MED') || str.includes('中')) count = 2;
+            
+            let html = '';
+            for(let i=0; i<count; i++) {
+                html += '<i class="fa-solid fa-fire text-morandi-red mr-1"></i>';
+            }
+            return html;
+        }
+
+        // 渲染 TradingView K線圖表 (延遲渲染機制)
+        function renderTradingViewChart(tvSymbol) {
+            const container = document.getElementById('tv-chart-container');
+            container.innerHTML = ''; // 清空舊圖
+            
+            // 防呆：如果代碼為空，預設給台積電，避免 TV 圖表崩潰跑出 Apple
+            const safeSymbol = tvSymbol || "TWSE:2330";
+
+            // 關鍵修復：使用 setTimeout 延遲 150 毫秒，確保頁籤切換 (display: flex) 已經被瀏覽器完整繪製，
+            // 容器具備了實際的寬高後，再呼叫 TradingView 繪圖，否則 TV 抓不到尺寸會預設載入 Apple。
+            setTimeout(() => {
+                if (typeof TradingView !== 'undefined') {
+                    new TradingView.widget({
+                        "autosize": true,
+                        "symbol": safeSymbol,
+                        "interval": "D",
+                        "timezone": "Asia/Taipei",
+                        "theme": "light",
+                        "style": "1", // 1代表K線(Candles)
+                        "locale": "zh_TW",
+                        "enable_publishing": false,
+                        "backgroundColor": "#ffffff",
+                        "gridColor": "rgba(184, 184, 176, 0.2)",
+                        "hide_top_toolbar": false,
+                        "hide_legend": false,
+                        "save_image": false,
+                        "container_id": "tv-chart-container"
+                    });
+                }
+            }, 150);
+        }
+
+        // 密碼彈出視窗控制函數
+        function showPasswordModal() {
+            const modal = document.getElementById('passwordModal');
+            const content = document.getElementById('passwordModalContent');
+            const errorMsg = document.getElementById('passwordError');
+            const input = document.getElementById('techPasswordInput');
+            
+            errorMsg.classList.add('hidden');
+            input.value = '';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // 觸發漸顯動畫
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                modal.classList.add('opacity-100');
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+                input.focus();
+            }, 10);
+        }
+
+        function closePasswordModal() {
+            const modal = document.getElementById('passwordModal');
+            const content = document.getElementById('passwordModalContent');
+            
+            modal.classList.remove('opacity-100');
+            modal.classList.add('opacity-0');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        }
+
+        function unlockTechTab() {
+            const pwd = document.getElementById('techPasswordInput').value;
+            if(pwd === '427088') {
+                isTechUnlocked = true;
+                closePasswordModal();
+                document.getElementById('lock-icon').classList.replace('fa-lock', 'fa-lock-open'); // 更換圖示
+                switchTab('technical', true); // 解鎖後強制切換
+            } else {
+                document.getElementById('passwordError').classList.remove('hidden');
+            }
+        }
+
+        // 新增匯出 PDF 功能
+        function exportPDF() {
+            const element = document.getElementById('reportContainer');
+            const ticker = document.getElementById('r-ticker').textContent || 'Report';
+            
+            const exportBtn = element.querySelector('button[onclick="exportPDF()"]');
+            if(exportBtn) exportBtn.style.display = 'none';
+
+            const fundTab = document.getElementById('tab-content-fundamental');
+            const techTab = document.getElementById('tab-content-technical');
+            const wasFundHidden = fundTab.classList.contains('hidden');
+            const wasTechHidden = techTab.classList.contains('hidden');
+            
+            fundTab.classList.remove('hidden');
+            fundTab.classList.add('flex');
+            
+            // PDF 匯出防呆：只有在解鎖狀態下，才把技術分析印出來
+            if (isTechUnlocked) {
+                techTab.classList.remove('hidden');
+                techTab.classList.add('flex');
+            }
+
+            const opt = {
+                margin:       10,
+                filename:     `海涵路分析報告_${ticker.replace(/\s+/g, '')}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                if(exportBtn) exportBtn.style.display = 'flex';
+                
+                if(wasFundHidden) {
+                    fundTab.classList.add('hidden');
+                    fundTab.classList.remove('flex');
+                }
+                
+                // 恢復原本的技術分析顯示狀態
+                if(wasTechHidden && isTechUnlocked) {
+                    techTab.classList.add('hidden');
+                    techTab.classList.remove('flex');
+                }
+            });
+        }
+
+        // 切換頁籤功能 (加入密碼驗證邏輯)
+        function switchTab(tabId, bypassLock = false) {
+            // 如果點擊技術分析，且尚未解鎖，攔截並跳出密碼框
+            if (tabId === 'technical' && !isTechUnlocked && !bypassLock) {
+                showPasswordModal();
+                return;
+            }
+
+            const btnFund = document.getElementById('tab-btn-fundamental');
+            const btnTech = document.getElementById('tab-btn-technical');
+            const contentFund = document.getElementById('tab-content-fundamental');
+            const contentTech = document.getElementById('tab-content-technical');
+
+            if (tabId === 'fundamental') {
+                contentFund.classList.remove('hidden');
+                contentFund.classList.add('flex');
+                contentTech.classList.add('hidden');
+                contentTech.classList.remove('flex');
+                
+                btnFund.classList.add('border-morandi-blue', 'text-morandi-blue');
+                btnFund.classList.remove('border-transparent', 'text-morandi-muted');
+                btnTech.classList.remove('border-morandi-blue', 'text-morandi-blue');
+                btnTech.classList.add('border-transparent', 'text-morandi-muted');
+            } else {
+                contentTech.classList.remove('hidden');
+                contentTech.classList.add('flex');
+                contentFund.classList.add('hidden');
+                contentFund.classList.remove('flex');
+
+                btnTech.classList.add('border-morandi-blue', 'text-morandi-blue');
+                btnTech.classList.remove('border-transparent', 'text-morandi-muted');
+                btnFund.classList.remove('border-morandi-blue', 'text-morandi-blue');
+                btnFund.classList.add('border-transparent', 'text-morandi-muted');
+
+                // 當切換到技術分析頁籤，且圖表尚未渲染時，執行渲染 (避免 display:none 造成的高寬為0錯誤)
+                if (!isChartRendered && currentChartSymbol) {
+                    renderTradingViewChart(currentChartSymbol);
+                    isChartRendered = true;
+                }
+            }
+        }
+
+        async function generateReport() {
+            const input = document.getElementById('tickerInput').value.trim();
+            if (!input) return;
+
+            // 動態取得今天日期，以限制新聞的近三個月範圍
+            const today = new Date();
+            const dateContext = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+
+            // UI 狀態切換
+            document.getElementById('reportContainer').classList.add('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('generateBtn').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            try {
+                // 構建 Gemini API Payload
+                const systemPrompt = `你是一位買方(Buy-Side)專業台股投資經理人。今天是 ${dateContext}。
+你的目標只有一個：幫助基金做出最有利於回報的正確決策，無論決策多麼逆勢。這是一份「內部的決策工具」。
+請務必使用 Google 搜尋獲取指定台股標的「台灣股市(TWSE/TPEX)」最新、最即時的資訊。
+🚨【極度重要】：股價、單日漲跌幅、本益比、市值必須是「台灣本地股市（台股）」的最新數據，絕對不可使用美股 ADR 或海外掛牌的價格。請搜尋「Yahoo 股市 [股票代號]」或「[股票代號] 台灣證券交易所 即時股價」來確保報價正確。
+根據這些即時資訊，輸出符合所提供 JSON schema 的深度分析報告。
+嚴格遵守以下規則：
+1. 評等(rating)只能從以下選擇："Buy" (買入/跑贏大盤), "Hold" (持有/與大盤一致), "Sell" (賣出/跑輸大盤)。
+2. 買方觀點對決：主動尋找市場多空觀點進行交叉驗證。必須提供「看多觀點(理由1,2,3)」與「看空觀點(理由X,Y,Z)」的思辨過程。找出分析師為什麼對同樣數據有不同解讀。
+3. 獨立決策：在吸收消化正反觀點後，給出經理人的「核心判斷」(例如：市場忽略了某因素，我決定站在某一方)。
+4. 新聞(news)請提供 5 到 10 則，影響力(impact)請填寫 "High", "Medium", 或 "Low"。新聞來源必須嚴格限制為「中央社財經新聞」與「鉅亨網」，且【新聞發布時間必須限制在近三個月內】。
+5. 股價與漲幅請直接提供數值，請絕對不要加上貨幣單位（如 TWD）。
+6. 目標價(targetPrice)請給出一個明確的「單一數值」，絕對不要給區間。
+7. 請提供該股的類股、產業、概念標籤(tags)，例如：#半導體業、#SEMI矽光子。
+8. 包含技術分析：支撐壓力線、短中長期均線、K線、KD指標(判斷超買超賣及交叉)、MACD、布林通道(開口及上下軌)、乖離率(正負乖離)及技術面總結。
+9. 回傳代號時，務必包含股票代碼以及交易市場後綴 (上市為 .TW，上櫃為 .TWO)。`;
+
+                const userQuery = `請分析這檔台灣股市標的：${input}。請務必優先搜尋「${input} Yahoo 股市 最新股價」，取得台灣時間今天的最新「台股」現價，並嚴格篩選「近三個月內」的新聞。`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "ticker": { type: "STRING", description: "股票代號與名稱，請務必包含後綴，上市請用 .TW，上櫃請用 .TWO，例如：鴻海 (2317.TW)" },
+                                "tags": { type: "ARRAY", items: { type: "STRING" }, description: "類股、產業、概念標籤，字首需加上 #，例如：#半導體業" },
+                                "currentPrice": { type: "STRING", description: "最新股價數值，不包含任何幣值或TWD" },
+                                "priceChange": { type: "STRING", description: "單日漲跌幅，例如：+1.00 (+0.40%)" },
+                                "peRatio": { type: "STRING", description: "目前或預估本益比" },
+                                "marketCap": { type: "STRING", description: "市值" },
+                                "rating": { type: "STRING", enum: ["Buy", "Hold", "Sell"] },
+                                "buySide": {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "bullish": { type: "STRING", description: "分析師的看多觀點與具體理由" },
+                                        "bearish": { type: "STRING", description: "分析師的看空觀點與具體理由" },
+                                        "judgment": { type: "STRING", description: "經理人的核心判斷與獨立決策結論" }
+                                    }
+                                },
+                                "targetPrice": { type: "STRING", description: "未來一年目標價（單一數值），不可填寫區間" },
+                                "valRelative": {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        "algorithm": { type: "STRING", description: "簡述算法" }, 
+                                        "logic": { type: "STRING", description: "邏輯說明" }, 
+                                        "pros": { type: "STRING", description: "該估值法的優點" },
+                                        "cons": { type: "STRING", description: "該估值法的缺點" }
+                                    }
+                                },
+                                "valAbsolute": {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        "algorithm": { type: "STRING", description: "簡述算法" }, 
+                                        "logic": { type: "STRING", description: "邏輯說明" }, 
+                                        "pros": { type: "STRING", description: "該估值法的優點" },
+                                        "cons": { type: "STRING", description: "該估值法的缺點" } 
+                                    }
+                                },
+                                "factors": {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        "macro": { type: "STRING", description: "宏觀經濟前景 (例如：GNP 增長預測)" }, 
+                                        "capital": { type: "STRING", description: "資本市場 (金融市場的整體狀況)" }, 
+                                        "industry": { type: "STRING", description: "產業展望 (該行業的發展趨勢)" },
+                                        "company": { type: "STRING", description: "公司特定評估 (營收、利潤、債務等)" }
+                                    }
+                                },
+                                "technicalAnalysis": {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "supportResistance": { type: "STRING", description: "支撐線與壓力線價位及近期反彈/壓回區間說明" },
+                                        "movingAverages": { type: "STRING", description: "短(5/10日)、中(20/60日)、長(120/240日)期均線排列與趨勢" },
+                                        "kLine": { type: "STRING", description: "近期K線型態分析" },
+                                        "kd": { type: "STRING", description: "KD指標狀態，包含K/D值、黃金/死亡交叉，及超買(>80)/超賣(<20)判斷" },
+                                        "macd": { type: "STRING", description: "MACD狀態，包含DIF快線、MACD慢線狀態、柱狀圖變化及多空力道" },
+                                        "bollinger": { type: "STRING", description: "布林通道狀態，包含股價與中軸及上下軌的關係、通道收斂或發散" },
+                                        "bias": { type: "STRING", description: "乖離率狀態，正負乖離判斷及後續可能反彈或修正之預期" },
+                                        "summary": { type: "STRING", description: "技術分析綜合總結，給出目前技術面的趨勢結論" }
+                                    }
+                                },
+                                "news": {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: { 
+                                            "title": { type: "STRING" }, 
+                                            "source": { type: "STRING", description: "限中央社財經新聞或鉅亨網" }, 
+                                            "url": { type: "STRING", description: "真實的新聞來源網址" },
+                                            "impact": { type: "STRING", enum: ["High", "Medium", "Low"] }, 
+                                            "analysis": { type: "STRING", description: "分析師短評" } 
+                                        }
+                                    }
+                                },
+                                "summary": { type: "STRING", description: "經理人總結(2-3段)" }
+                            },
+                            required: ["ticker", "tags", "currentPrice", "rating", "buySide", "targetPrice", "valRelative", "valAbsolute", "factors", "technicalAnalysis", "news", "summary"]
+                        }
+                    }
+                };
+
+                // 發送請求到我們自己寫的 Vercel Serverless Function
+                const apiUrl = '/api/generate';
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload }) // 注意這裡我們把 payload 包裝起來傳給後端
+                });
+
+                if (!response.ok) throw new Error('API Request Failed');
+                
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    
+                    const jsonStr = result.candidates[0].content.parts[0].text;
+                    const data = JSON.parse(jsonStr);
+
+                    // 處理標籤
+                    const tagsContainer = document.getElementById('r-tags');
+                    tagsContainer.innerHTML = '';
+                    if (data.tags && data.tags.length > 0) {
+                        data.tags.forEach(tag => {
+                            const span = document.createElement('span');
+                            span.className = "px-2 py-1 bg-morandi-gray/10 text-morandi-text text-xs rounded-lg border border-morandi-gray/30 font-semibold shadow-sm";
+                            span.textContent = tag;
+                            tagsContainer.appendChild(span);
+                        });
+                    }
+
+                    document.getElementById('r-ticker').textContent = data.ticker;
+                    document.getElementById('r-marketCap').textContent = `市值: ${data.marketCap || '---'}`;
+                    document.getElementById('r-price').textContent = data.currentPrice;
+                    
+                    const changeEl = document.getElementById('r-change');
+                    changeEl.textContent = data.priceChange;
+                    if(data.priceChange.includes('+')) {
+                        changeEl.className = "text-2xl font-mono font-semibold text-morandi-red"; // 台股紅漲
+                    } else if (data.priceChange.includes('-')) {
+                        changeEl.className = "text-2xl font-mono font-semibold text-morandi-green"; // 綠跌
+                    } else {
+                        changeEl.className = "text-2xl font-mono font-semibold text-morandi-muted";
+                    }
+
+                    document.getElementById('r-pe').textContent = data.peRatio || '---';
+                    document.getElementById('r-target').textContent = data.targetPrice;
+
+                    const ratingBadge = document.getElementById('r-rating-badge');
+                    const ratingUpper = data.rating.toUpperCase();
+                    if(ratingUpper.includes('BUY')) {
+                        ratingBadge.textContent = "買入 / 強力買入 (Buy / Strong Buy)";
+                        ratingBadge.className = "px-6 py-2 rounded-xl border-2 font-bold text-lg md:text-xl bg-morandi-green/10 text-morandi-green border-morandi-green shadow-sm whitespace-nowrap";
+                    } else if (ratingUpper.includes('SELL') || ratingUpper.includes('UNDER')) {
+                        ratingBadge.textContent = "賣出 / 表現不佳 (Sell / Underperform)";
+                        ratingBadge.className = "px-6 py-2 rounded-xl border-2 font-bold text-lg md:text-xl bg-morandi-red/10 text-morandi-red border-morandi-red shadow-sm whitespace-nowrap";
+                    } else {
+                        ratingBadge.textContent = "持有 / 中性 (Hold / Neutral)";
+                        ratingBadge.className = "px-6 py-2 rounded-xl border-2 font-bold text-lg md:text-xl bg-morandi-blue/10 text-morandi-blue border-morandi-blue shadow-sm whitespace-nowrap";
+                    }
+                    
+                    document.getElementById('r-view-bull').innerHTML = formatText(data.buySide.bullish);
+                    document.getElementById('r-view-bear').innerHTML = formatText(data.buySide.bearish);
+                    document.getElementById('r-view-judgment').innerHTML = formatText(data.buySide.judgment);
+
+                    // 估值模型
+                    document.getElementById('r-valRel-algo').innerHTML = formatText(data.valRelative.algorithm);
+                    document.getElementById('r-valRel-logic').innerHTML = formatText(data.valRelative.logic);
+                    document.getElementById('r-valRel-pros').innerHTML = formatText(data.valRelative.pros);
+                    document.getElementById('r-valRel-cons').innerHTML = formatText(data.valRelative.cons);
+
+                    document.getElementById('r-valAbs-algo').innerHTML = formatText(data.valAbsolute.algorithm);
+                    document.getElementById('r-valAbs-logic').innerHTML = formatText(data.valAbsolute.logic);
+                    document.getElementById('r-valAbs-pros').innerHTML = formatText(data.valAbsolute.pros);
+                    document.getElementById('r-valAbs-cons').innerHTML = formatText(data.valAbsolute.cons);
+
+                    // 因素
+                    document.getElementById('r-fact-macro').innerHTML = formatText(data.factors.macro);
+                    document.getElementById('r-fact-capital').innerHTML = formatText(data.factors.capital);
+                    document.getElementById('r-fact-industry').innerHTML = formatText(data.factors.industry);
+                    document.getElementById('r-fact-company').innerHTML = formatText(data.factors.company);
+
+                    // 技術分析
+                    document.getElementById('r-ta-support').innerHTML = formatText(data.technicalAnalysis.supportResistance);
+                    document.getElementById('r-ta-ma').innerHTML = formatText(data.technicalAnalysis.movingAverages);
+                    document.getElementById('r-ta-kline').innerHTML = formatText(data.technicalAnalysis.kLine);
+                    document.getElementById('r-ta-kd').innerHTML = formatText(data.technicalAnalysis.kd);
+                    document.getElementById('r-ta-macd').innerHTML = formatText(data.technicalAnalysis.macd);
+                    document.getElementById('r-ta-bollinger').innerHTML = formatText(data.technicalAnalysis.bollinger);
+                    document.getElementById('r-ta-bias').innerHTML = formatText(data.technicalAnalysis.bias);
+                    document.getElementById('r-ta-summary').innerHTML = formatText(data.technicalAnalysis.summary);
+
+                    // 確保新聞嚴格按照影響力（High > Medium > Low）由大到小排序
+                    if (data.news && data.news.length > 0) {
+                        data.news.sort((a, b) => {
+                            const getWeight = (impact) => {
+                                const str = String(impact || '').toUpperCase();
+                                if (str.includes('HIGH') || str.includes('高')) return 3;
+                                if (str.includes('MED') || str.includes('中')) return 2;
+                                return 1; // Low 或其他
+                            };
+                            return getWeight(b.impact) - getWeight(a.impact);
+                        });
+                    }
+
+                    const newsBody = document.getElementById('r-news-body');
+                    newsBody.innerHTML = '';
+                    if(data.news && data.news.length > 0) {
+                        data.news.forEach(item => {
+                            // 修正：因為 AI 極容易產生無效的幻覺網址 (404)，改用 Google 搜尋該新聞標題，保證必定能搜到真實原文
+                            const safeUrl = `https://www.google.com/search?q=${encodeURIComponent(item.title + ' ' + item.source)}`;
+
+                            const tr = document.createElement('tr');
+                            tr.className = "border-b border-morandi-gray/20 hover:bg-morandi-gray/10 transition-colors";
+                            tr.innerHTML = `
+                                <td class="py-4 pr-4 whitespace-nowrap">${getImpactIcons(item.impact)}</td>
+                                <td class="py-4 pr-4">
+                                    <a href="${safeUrl}" target="_blank" class="font-semibold text-morandi-blue hover:text-[#8fa1ae] hover:underline mb-1 block transition-colors">${item.title}</a>
+                                    <div class="text-xs text-morandi-muted"><i class="fa-solid fa-link mr-1"></i>${item.source}</div>
+                                </td>
+                                <td class="py-4 text-morandi-text">${formatText(item.analysis)}</td>
+                            `;
+                            newsBody.appendChild(tr);
+                        });
+                    } else {
+                        newsBody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-morandi-muted">暫無近期重大新聞分析</td></tr>';
+                    }
+
+                    // 總結
+                    document.getElementById('r-summary').innerHTML = `<p>${formatText(data.summary).replace(/\n/g, '</p><p class="mt-2">')}</p>`;
+
+                    // 解析股票代號 (用於 TradingView，但先不渲染)
+                    let codeMatch = data.ticker.match(/\d{4,}/);
+                    if (!codeMatch) codeMatch = input.match(/\d{4,}/);
+                    
+                    if (codeMatch) {
+                        const code = codeMatch[0];
+                        const upperTicker = data.ticker.toUpperCase();
+                        if (upperTicker.includes('.TWO') || upperTicker.includes('TPEX') || upperTicker.includes('上櫃')) {
+                            currentChartSymbol = `TPEX:${code}`;
+                        } else {
+                            currentChartSymbol = `TWSE:${code}`;
+                        }
+                    } else {
+                        // 防呆機制：如果 AI 回傳與輸入都沒有數字，保留台積電為底，避免無法渲染
+                        currentChartSymbol = "TWSE:2330";
+                    }
+                    
+                    isChartRendered = false; // 標記為未渲染，等切換到該頁籤時再畫
+                    document.getElementById('tv-chart-container').innerHTML = '';
+
+                    // 顯示結果
+                    document.getElementById('loadingIndicator').classList.add('hidden');
+                    document.getElementById('reportContainer').classList.remove('hidden');
+                    document.getElementById('reportContainer').classList.add('flex');
+
+                    // 強制切換回分析師觀點頁籤，確保使用者每次查詢都從第一頁開始看
+                    switchTab('fundamental', true);
+
+                } else {
+                    throw new Error('Invalid Response Format');
+                }
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('loadingIndicator').classList.add('hidden');
+                document.getElementById('errorMessage').classList.remove('hidden');
+                document.getElementById('errorText').textContent = error.message === 'API Request Failed' 
+                    ? '網路連線或 API 呼叫失敗，請稍後再試。' 
+                    : '分析模型回傳資料格式異常，請換個股票代號再試一次。';
+            } finally {
+                // 恢復按鈕狀態
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('generateBtn').innerHTML = '<span>生成報告</span>';
+            }
+        }
+    </script>
+</body>
+</html>
