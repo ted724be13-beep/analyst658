@@ -347,7 +347,7 @@ export default function App() {
                 }
             };
 
-            const apiKey = ''; // 請在此填入您的 API Key 或由系統自動注入
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) {
