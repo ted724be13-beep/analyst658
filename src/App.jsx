@@ -270,8 +270,7 @@ export default function App() {
                 }
             };
 
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const apiUrl = '/api/gemini';
             
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) {
@@ -347,8 +346,7 @@ export default function App() {
                 }
             };
 
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const apiUrl = '/api/gemini';
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
